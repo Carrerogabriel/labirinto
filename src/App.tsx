@@ -4,8 +4,24 @@ import exitPhoto from "./assets/exit.jpg";
 import heroPhoto from "./assets/hero.jpg";
 import { canWalk, generateMaze, keyOf, type Maze, type Point } from "./maze";
 
-const ROWS = 8;
-const COLS = 10;
+const TOTAL_LEVELS = 10;
+
+const ROUND_PHRASES = [
+  "Bora que tu consegue",
+  "se tiver borocoxó não vai ganhar.",
+  "a montanha só parece insubivel porque é vista de longe.",
+  "se demorar muito ta me devendo um subway.",
+  "Se perder a macumbeira volta.",
+  "ta quase ein cuca",
+  "esse leão foi no soco",
+  "mais um pouco e eu jogo uma pedra no carro da tua chefa.",
+  "Depois da tempestade vem a bonanza",
+];
+
+function mazeSize(level: number): { rows: number; cols: number } {
+  const bump = Math.floor((level - 1) / 3);
+  return { rows: 8 + bump, cols: 10 + bump };
+}
 
 type Facing = "up" | "down" | "left" | "right";
 
@@ -65,32 +81,38 @@ function formatTime(seconds: number): string {
   return `${m}:${s}`;
 }
 
-function newRun(): {
+function newRun(level = 1, steps = 0): {
   maze: Maze;
   player: Point;
   visited: Set<string>;
   steps: number;
   facing: Facing;
 } {
-  const maze = generateMaze(ROWS, COLS);
+  const { rows, cols } = mazeSize(level);
+  const maze = generateMaze(rows, cols);
   return {
     maze,
     player: { ...maze.start },
     visited: new Set([keyOf(maze.start)]),
-    steps: 0,
+    steps,
     facing: "right",
   };
 }
 
 export default function App() {
-  const [run, setRun] = useState(newRun);
+  const [level, setLevel] = useState(1);
+  const [run, setRun] = useState(() => newRun(1));
   const [seconds, setSeconds] = useState(0);
   const [won, setWon] = useState(false);
+  const [roundClear, setRoundClear] = useState<number | null>(null);
   const wonRef = useRef(false);
+  const pausedRef = useRef(false);
+  const levelRef = useRef(1);
   const boardRef = useRef<HTMLDivElement>(null);
   const runRef = useRef(run);
   const winSoundRef = useRef<HTMLAudioElement | null>(null);
   runRef.current = run;
+  levelRef.current = level;
 
   const { maze, player, visited, steps, facing } = run;
   const balloons = useMemo(() => (won ? makeBalloons(36) : []), [won]);
@@ -120,22 +142,43 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (won) return;
+    if (won || roundClear !== null) return;
     const id = window.setInterval(() => setSeconds((n) => n + 1), 1000);
     return () => window.clearInterval(id);
-  }, [won, maze]);
+  }, [won, roundClear]);
 
   const restart = useCallback(() => {
     stopWinSound();
     wonRef.current = false;
+    pausedRef.current = false;
+    levelRef.current = 1;
     setWon(false);
+    setRoundClear(null);
+    setLevel(1);
     setSeconds(0);
-    setRun(newRun());
+    setRun(newRun(1));
     boardRef.current?.focus();
   }, []);
 
+  const continueRound = useCallback(() => {
+    pausedRef.current = false;
+    setRoundClear(null);
+    boardRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (roundClear === null || won) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      continueRound();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [roundClear, won, continueRound]);
+
   const tryMove = useCallback((dir: Facing) => {
-    if (wonRef.current) return;
+    if (wonRef.current || pausedRef.current) return;
     const current = runRef.current;
     if (!canWalk(current.maze, current.player, dir)) {
       runRef.current = { ...current, facing: dir };
@@ -166,11 +209,22 @@ export default function App() {
       facing: dir,
     };
     setRun(runRef.current);
-    if (reachedExit) {
-      wonRef.current = true;
-      setWon(true);
-      playWinSound();
+    if (!reachedExit) return;
+    if (levelRef.current < TOTAL_LEVELS) {
+      const cleared = levelRef.current;
+      const nextLevel = cleared + 1;
+      levelRef.current = nextLevel;
+      pausedRef.current = true;
+      setLevel(nextLevel);
+      setRoundClear(cleared);
+      const nextRun = newRun(nextLevel, runRef.current.steps);
+      runRef.current = nextRun;
+      setRun(nextRun);
+      return;
     }
+    wonRef.current = true;
+    setWon(true);
+    playWinSound();
   }, []);
 
   useEffect(() => {
@@ -265,10 +319,18 @@ export default function App() {
     <div className="app">
       <header className="hud">
         <div>
-          <p className="kicker">Fácil</p>
+          <p className="kicker">
+            Nível {level} de {TOTAL_LEVELS}
+          </p>
           <h1>Labirinto</h1>
         </div>
         <ul className="stats">
+          <li>
+            <span>Nível</span>
+            <strong>
+              {level}/{TOTAL_LEVELS}
+            </strong>
+          </li>
           <li>
             <span>Tempo</span>
             <strong>{formatTime(seconds)}</strong>
@@ -279,7 +341,7 @@ export default function App() {
           </li>
         </ul>
         <button type="button" onClick={restart}>
-          Novo labirinto
+          Recomeçar
         </button>
       </header>
 
@@ -290,7 +352,7 @@ export default function App() {
             className="board"
             tabIndex={0}
             role="application"
-            aria-label="Labirinto fácil. Ande pelos cômodos até a saída."
+            aria-label={`Labirinto nível ${level} de ${TOTAL_LEVELS}. Ande pelos cômodos até a saída.`}
             style={{
               gridTemplateColumns: `repeat(${maze.cols}, 64px)`,
               gridTemplateRows: `repeat(${maze.rows}, 64px)`,
@@ -322,8 +384,9 @@ export default function App() {
             paredes; as finas são aberturas por onde o personagem passa.
           </p>
           <p>
-            Leve a personagem até a clínica <strong>Select Odonto</strong>.
-            Só existe essa saída.
+            Leve a personagem até a clínica <strong>Select Odonto</strong> em
+            cada fase. São {TOTAL_LEVELS} níveis: só avança quem chega na
+            saída. A festa espera no último.
           </p>
           <p className="keys">
             Mover: <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> ou{" "}
@@ -331,6 +394,23 @@ export default function App() {
           </p>
         </aside>
       </main>
+
+      {roundClear !== null && !won && (
+        <div className="overlay toast-overlay" role="dialog" aria-modal="true">
+          <div className="modal toast-modal">
+            <p className="kicker">
+              Fase {roundClear} concluída
+            </p>
+            <h2>{ROUND_PHRASES[roundClear - 1]}</h2>
+            <p>
+              Nível {level} de {TOTAL_LEVELS} te espera.
+            </p>
+            <button type="button" onClick={continueRound}>
+              Continuar
+            </button>
+          </div>
+        </div>
+      )}
 
       {won && (
         <div className="overlay" role="dialog" aria-modal="true">
@@ -356,7 +436,7 @@ export default function App() {
           <div className="modal">
             <img src={exitPhoto} alt="" className="modal-exit" />
             <p className="kicker">Escapou</p>
-            <h2>Ainda vou te incomodar um monte, tu que lute. e eu quero lutar pra bater em todos os leões por ti</h2>
+            <h2>Ainda vou te incomodar um monte, tu que lute. e eu que lute pelos meus pontos. junto os leões no soco</h2>
             <p>
               Tempo {formatTime(seconds)} · {steps} passos
             </p>
