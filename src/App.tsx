@@ -380,11 +380,10 @@ export default function App() {
 
         <aside className="help">
           <p>
-            Cada quadrado é um caminho. As <strong>linhas grossas</strong> são
-            paredes; as finas são aberturas por onde o personagem passa.
+            Só não vai perder que nem tu perde no stop né
           </p>
           <p>
-            Leve a personagem até a clínica <strong>Select Odonto</strong> em
+            Leve a cuca até o fim do coliseu <strong>Select Odonto</strong> em
             cada fase. São {TOTAL_LEVELS} níveis: só avança quem chega na
             saída. A festa espera no último.
           </p>
